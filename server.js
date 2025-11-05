@@ -6,8 +6,8 @@ const bodyParser = require('body-parser');
 
 // Importa tus rutas
 const cotizarRoutes = require('./routes/cotizar');
-const usuarioRoutes = require('./routes/usuario'); // 👈 Mantenido
-
+const usuarioRoutes = require('./routes/usuario'); 
+const pushRoutes = require('./routes/push'); 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -25,7 +25,8 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Rutas principales
 app.use('/cotizacion', cotizarRoutes);
-app.use('/usuario', usuarioRoutes); // 👈 Mantenido
+app.use('/usuario', usuarioRoutes); 
+app.use('/push', pushRoutes); 
 
 app.get('/', (req, res) => {
   res.send('🚀 Servidor funcionando correctamente');

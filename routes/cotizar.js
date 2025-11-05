@@ -1,6 +1,7 @@
 // routes/cotizar.js
 const express = require('express');
 const Cotizacion = require('../models/Cotizar');
+const pushService = require('../services/pushService'); 
 
 const router = express.Router();
 
@@ -20,6 +21,20 @@ router.post('/', async (req, res) => {
 
     const nuevaCotizacion = await Cotizacion.create({ nombre, telefono, moto });
     console.log("✅ Cotización creada:", nuevaCotizacion);
+
+    // 🔔 Enviar notificación push a todos los suscriptores
+    try {
+      await pushService.sendQuotationNotification({
+        nombre: nuevaCotizacion.nombre,
+        telefono: nuevaCotizacion.telefono,
+        moto: nuevaCotizacion.moto,
+        _id: nuevaCotizacion._id
+      });
+      console.log('📤 Notificación push enviada para la cotización');
+    } catch (pushError) {
+      console.error('⚠ Error enviando notificación push:', pushError);
+      // No fallar la petición si falla la notificación
+    }
 
     res.status(201).json({
       success: true,

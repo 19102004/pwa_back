@@ -14,9 +14,14 @@ const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors({
-  origin: "http://localhost:4173",
-  methods: ["GET", "POST", "DELETE"],
+  origin: [
+    "http://localhost:4173",
+    "https://pwa-front-virid.vercel.app"
+  ],
+  methods: "GET,POST,PUT,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization"
 }));
+
 app.use(bodyParser.json());
 
 // MongoDB

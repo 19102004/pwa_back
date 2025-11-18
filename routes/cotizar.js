@@ -89,5 +89,66 @@ router.get('/:id', async (req, res) => {
     });
   }
 });
+// =========================================
+// ⭐ NUEVO: 🧪 Endpoint de prueba para notificaciones personalizadas
+// =========================================
+router.post('/test-notification', async (req, res) => {
+  try {
+    const cotizacionPrueba = {
+      _id: 'test-' + Date.now(),
+      nombre: 'Cliente de Prueba',
+      telefono: '1234567890',
+      moto: 'Honda CBR Test'
+    };
+    
+    const result = await pushService.sendPersonalizedQuotationNotification(cotizacionPrueba);
+    
+    res.json({
+      success: true,
+      message: 'Notificaciones personalizadas de prueba enviadas',
+      stats: {
+        successful: result.successful,
+        failed: result.failed,
+        total: result.successful + result.failed
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error en prueba de notificaciones:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al enviar notificaciones de prueba',
+      error: error.message
+    });
+  }
+});
+
+// =========================================
+// 🗑️ Eliminar una cotización
+// =========================================
+router.delete('/:id', async (req, res) => {
+  try {
+    const cotizacion = await Cotizacion.findByIdAndDelete(req.params.id);
+    
+    if (!cotizacion) {
+      return res.status(404).json({
+        success: false,
+        message: 'Cotización no encontrada'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Cotización eliminada correctamente',
+      cotizacion
+    });
+  } catch (error) {
+    console.error('❌ Error al eliminar cotización:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al eliminar la cotización'
+    });
+  }
+});
+
 
 module.exports = router;

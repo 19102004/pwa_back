@@ -8,6 +8,4 @@ const cotizacionSchema = new mongoose.Schema({
   fecha: { type: Date, default: Date.now }
 });
 
-// Esto automáticamente crea la colección "cotizacions" (plural de cotizacion)
-// Puedes forzar el nombre así: mongoose.model('Cotizacion', cotizacionSchema, 'cotizacion');
 module.exports = mongoose.model('Cotizacion', cotizacionSchema, 'cotizacion');

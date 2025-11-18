@@ -8,13 +8,14 @@ const bodyParser = require('body-parser');
 const cotizarRoutes = require('./routes/cotizar');
 const usuarioRoutes = require('./routes/usuario'); 
 const pushRoutes = require('./routes/push'); 
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors({
   origin: "http://localhost:4173",
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "DELETE"],
 }));
 app.use(bodyParser.json());
 

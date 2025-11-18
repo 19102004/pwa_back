@@ -1,9 +1,9 @@
-// services/pushService.js
+// services/pushService.js - VERSIÓN CORREGIDA Y COMPLETA
 const webpush = require('web-push');
 const path = require('path');
 const fs = require('fs');
 
-// Leer claves VAPID desde el archivo JSON (NUNCA desde .env)
+// Leer claves VAPID desde el archivo JSON
 const vapidConfigPath = path.join(__dirname, '../config/vapid.json');
 let vapidKeys = {
   publicKey: '',
@@ -27,53 +27,167 @@ webpush.setVapidDetails(
   vapidKeys.privateKey
 );
 
-// Array para almacenar las suscripciones (en producción usar base de datos)
+// Array para almacenar suscripciones legacy (compatibilidad)
 let subscriptions = [];
 
 /**
- * Agregar una nueva suscripción
- * @param {Object} subscription 
+ * ⭐ FUNCIÓN PRINCIPAL: Enviar notificación usando objeto de suscripción directo
+ * @param {Object} subscriptionObject - { endpoint, keys: { p256dh, auth } }
+ * @param {Object} payload - Contenido de la notificación
  */
-const addSubscription = (subscription) => {
-  // Evitar duplicados
-  const exists = subscriptions.some(
-    sub => JSON.stringify(sub) === JSON.stringify(subscription)
+const sendNotificationToSubscription = async (subscriptionObject, payload) => {
+  try {
+    // Validar que el objeto de suscripción tenga los campos necesarios
+    if (!subscriptionObject || !subscriptionObject.endpoint) {
+      throw new Error('Objeto de suscripción inválido: falta endpoint');
+    }
+
+    if (!subscriptionObject.keys || !subscriptionObject.keys.p256dh || !subscriptionObject.keys.auth) {
+      throw new Error('Objeto de suscripción inválido: faltan keys (p256dh o auth)');
+    }
+
+    const notificationPayload = JSON.stringify(payload);
+    
+    console.log('📤 Enviando notificación push...');
+    console.log('   Endpoint:', subscriptionObject.endpoint.substring(0, 60) + '...');
+    
+    await webpush.sendNotification(subscriptionObject, notificationPayload);
+    
+    console.log('✅ Notificación enviada exitosamente');
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ Error enviando notificación:', error.message);
+    
+    // Si el endpoint ya no es válido (410 Gone)
+    if (error.statusCode === 410) {
+      console.log('🗑️ Suscripción inválida (410 Gone) - debería eliminarse de la DB');
+      return { success: false, error: error.message, shouldDelete: true };
+    }
+    
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Agregar una nueva suscripción (legacy - para compatibilidad con /push/subscribe)
+ */
+const addSubscription = (subscriptionData) => {
+  const { id, subscription, metadata = {} } = subscriptionData;
+  
+  const existingIndex = subscriptions.findIndex(
+    sub => sub.subscription.endpoint === subscription.endpoint
   );
   
-  if (!exists) {
-    subscriptions.push(subscription);
-    console.log('✅ Nueva suscripción agregada:', subscription.endpoint);
+  if (existingIndex !== -1) {
+    subscriptions[existingIndex] = {
+      ...subscriptionData,
+      updatedAt: Date.now()
+    };
+    console.log('🔄 Suscripción actualizada:', id);
+  } else {
+    subscriptions.push({
+      ...subscriptionData,
+      createdAt: Date.now()
+    });
+    console.log('✅ Nueva suscripción agregada:', id);
   }
   
   return subscriptions.length;
 };
 
 /**
- * Obtener todas las suscripciones
+ * Obtener todas las suscripciones (legacy)
  */
 const getSubscriptions = () => {
   return subscriptions;
 };
 
 /**
- * Enviar notificación a todas las suscripciones
- * @param {Object} payload 
+ * Obtener una suscripción por ID (legacy)
+ */
+const getSubscriptionById = (subscriptionId) => {
+  return subscriptions.find(sub => sub.id === subscriptionId);
+};
+
+/**
+ * ⭐ DEPRECADO - Usar sendNotificationToSubscription() en su lugar
+ */
+const sendPersonalizedNotification = async (subscriptionIdOrObject, payload) => {
+  console.warn('⚠️ sendPersonalizedNotification está deprecada, usa sendNotificationToSubscription');
+  
+  // Si recibimos un objeto directamente (nuevo comportamiento)
+  if (typeof subscriptionIdOrObject === 'object' && subscriptionIdOrObject.endpoint) {
+    return await sendNotificationToSubscription(subscriptionIdOrObject, payload);
+  }
+  
+  // Comportamiento legacy (buscar por ID)
+  const subData = subscriptions.find(s => s.id === subscriptionIdOrObject);
+  
+  if (!subData) {
+    console.error(`❌ Suscripción ${subscriptionIdOrObject} no encontrada`);
+    return { success: false, error: 'Suscripción no encontrada' };
+  }
+
+  return await sendNotificationToSubscription(subData.subscription, payload);
+};
+
+/**
+ * Enviar notificaciones DIFERENTES a cada suscriptor (legacy)
+ */
+const sendPersonalizedToAll = async (payloadGenerator) => {
+  console.log(`📤 Enviando notificaciones personalizadas a ${subscriptions.length} suscriptores...`);
+  
+  const results = await Promise.allSettled(
+    subscriptions.map(async (subData) => {
+      try {
+        const personalizedPayload = payloadGenerator(subData);
+        const result = await sendNotificationToSubscription(subData.subscription, personalizedPayload);
+        
+        if (result.success) {
+          console.log(`✅ Notificación personalizada enviada a ${subData.id}`);
+          return { success: true, subscriptionId: subData.id };
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (error) {
+        console.error(`❌ Error enviando a ${subData.id}:`, error.message);
+        
+        if (error.statusCode === 410) {
+          subscriptions = subscriptions.filter(s => s.id !== subData.id);
+          console.log(`🗑️ Suscripción inválida eliminada: ${subData.id}`);
+        }
+        
+        return { success: false, subscriptionId: subData.id, error: error.message };
+      }
+    })
+  );
+  
+  const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+  const failed = results.length - successful;
+  
+  console.log(`📊 Resumen: ${successful} exitosas, ${failed} fallidas`);
+  
+  return { successful, failed, results };
+};
+
+/**
+ * Enviar notificación igual a todas las suscripciones (legacy)
  */
 const sendNotificationToAll = async (payload) => {
   const notificationPayload = JSON.stringify(payload);
   
   console.log(`📤 Enviando notificación a ${subscriptions.length} suscriptores...`);
   
-  const promises = subscriptions.map(async (subscription, index) => {
+  const promises = subscriptions.map(async (subData, index) => {
     try {
-      await webpush.sendNotification(subscription, notificationPayload);
+      await webpush.sendNotification(subData.subscription, notificationPayload);
       console.log(`✅ Notificación enviada a suscriptor ${index + 1}`);
     } catch (error) {
       console.error(`❌ Error enviando notificación a suscriptor ${index + 1}:`, error.message);
       
-      // Si el endpoint ya no es válido (410 Gone), eliminar la suscripción
       if (error.statusCode === 410) {
-        subscriptions = subscriptions.filter(sub => sub !== subscription);
+        subscriptions = subscriptions.filter(sub => sub.id !== subData.id);
         console.log('🗑️ Suscripción inválida eliminada');
       }
     }
@@ -83,8 +197,7 @@ const sendNotificationToAll = async (payload) => {
 };
 
 /**
- * Enviar notificación de nueva cotización
- * @param {Object} cotizacion - Datos de la cotización
+ * Enviar notificación de nueva cotización (legacy)
  */
 const sendQuotationNotification = async (cotizacion) => {
   const payload = {
@@ -104,17 +217,73 @@ const sendQuotationNotification = async (cotizacion) => {
 };
 
 /**
- * Obtener la clave pública VAPID para el cliente
+ * Enviar notificación personalizada de nueva cotización (legacy)
+ */
+const sendPersonalizedQuotationNotification = async (cotizacion) => {
+  return await sendPersonalizedToAll((subData) => {
+    const customMessages = [
+      `¡Hola ${subData.id}! Nueva cotización de ${cotizacion.nombre}`,
+      `${subData.id}, revisa esta cotización para ${cotizacion.moto}`,
+      `Atención ${subData.id}: ${cotizacion.nombre} quiere ${cotizacion.moto}`,
+      `${subData.id}, tienes trabajo: ${cotizacion.nombre} pide cotización`
+    ];
+    
+    const messageIndex = parseInt(subData.id.slice(-1), 16) % customMessages.length;
+    const personalizedBody = customMessages[messageIndex] || customMessages[0];
+    
+    return {
+      title: `🏍️ Nueva Cotización - ${subData.id}`,
+      body: personalizedBody,
+      icon: '/cb190r.png',
+      badge: '/cb190r.png',
+      data: {
+        url: '/',
+        cotizacion: cotizacion,
+        subscriptionId: subData.id,
+        personalMessage: `Este mensaje es exclusivo para ${subData.id}`,
+        timestamp: Date.now()
+      },
+      tag: `quotation-${cotizacion._id || Date.now()}`,
+      requireInteraction: true
+    };
+  });
+};
+
+/**
+ * Obtener la clave pública VAPID
  */
 const getPublicKey = () => {
   return vapidKeys.publicKey;
 };
 
-module.exports = {
-  addSubscription,
-  getSubscriptions,
-  sendNotificationToAll,
-  sendQuotationNotification,
-  getPublicKey
+/**
+ * Eliminar suscripción por ID (legacy)
+ */
+const removeSubscription = (subscriptionId) => {
+  const initialLength = subscriptions.length;
+  subscriptions = subscriptions.filter(sub => sub.id !== subscriptionId);
+  const removed = initialLength - subscriptions.length;
+  
+  if (removed > 0) {
+    console.log(`🗑️ Suscripción eliminada: ${subscriptionId}`);
+  }
+  
+  return removed > 0;
 };
 
+module.exports = {
+  // ⭐ FUNCIÓN PRINCIPAL (NUEVA)
+  sendNotificationToSubscription,
+  
+  // Funciones legacy (mantener para compatibilidad)
+  addSubscription,
+  getSubscriptions,
+  getSubscriptionById,
+  sendNotificationToAll,
+  sendQuotationNotification,
+  sendPersonalizedNotification,
+  sendPersonalizedToAll,
+  sendPersonalizedQuotationNotification,
+  removeSubscription,
+  getPublicKey
+};
